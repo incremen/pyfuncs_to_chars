@@ -1,19 +1,20 @@
-constructible = {\
-    0: sum(range(sum(range(len(chr(ord(min(str(not()))))))))), # 3 etc.
-    1: len(chr(ord(min(str(not()))))),
-    4: len(str(not())),                
-    6: sum(range(len(str(not())))), 
-    84: ord(min(str(not()))),              
-    3486: sum(range(ord(min(str(not()))))), 
+constructible = {
+    0: (lambda: sum(range(sum(range(len(chr(ord(min(str(not()))))))))), "sum(range(sum(range(len(chr(ord(min(str(not())))))))))"),
+    1: (lambda: len(chr(ord(min(str(not()))))), "len(chr(ord(min(str(not())))))"),
+    4: (lambda: len(str(not())), "len(str(not()))"),
+    6: (lambda: sum(range(len(str(not())))), "sum(range(len(str(not()))))"),
+    84: (lambda: ord(min(str(not()))), "ord(min(str(not())))"),
+    3486: (lambda: sum(range(ord(min(str(not()))))), "sum(range(ord(min(str(not())))))"),
 }
 
 def show_constructible(d=constructible):
     print("Constructible numbers so far:\n")
-    for name, expr in d.items():
+    for value, (func, expr_str) in d.items():
         try:
-            print(f"{name:25s} -> {expr}")
+            expr_val = func()
+            print(f"{expr_val} = {expr_str}")
         except Exception as e:
-            print(f"{name:25s} -> ERROR ({e})")
+            print(f"{value:6} -> ERROR ({e}) | {expr_str}")
 
 if __name__ == "__main__":
     show_constructible()
