@@ -34,27 +34,22 @@ def stepwise_bracket_eval(expr):
     s = expr
     print(f"Start: {s}")
     while True:
-        stack = []
-        innermost = None
-        for i, c in enumerate(s):
-            if c == '(': stack.append(i)
-            elif c == ')' and stack:
-                start = stack.pop()
-                innermost = (start, i)
-                break
-        if not innermost:
+        lefts = [i for i, c in enumerate(s) if c == '(']
+        rights = [i for i, c in enumerate(s) if c == ')']
+        if not lefts or not rights or len(lefts) != len(rights):
             break
+        n = len(lefts)
+        pairs = [(lefts[i], rights[-(i+1)]) for i in range(n)]
+        # Find the innermost (largest left, smallest right)
+        innermost = max(pairs, key=lambda p: p[0])
         start, end = innermost
         subexpr = s[start:end+1]
         to_eval = s[start+1:end]
-        if not to_eval.strip():
-            print(f"Error: Empty parentheses {subexpr}.")
-            return
         try:
             val = eval(to_eval, {'__builtins__': __builtins__})
         except Exception as e:
             print(f"Error evaluating {to_eval!r}: {e}")
-            return
+            
         print(f"Evaluating: {subexpr} = {val}")
         s = s[:start] + str(val) + s[end+1:]
         print(f"Now: {s}")
