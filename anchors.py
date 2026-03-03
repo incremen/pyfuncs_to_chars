@@ -1,15 +1,18 @@
 """Build Python expressions for any integer using only builtin calls — no numeric literals.
 
-Approach:
-  1. Base anchors: numbers directly constructible (e.g., ord(min(str(not()))) = 84)
-  2. Expand via operations like sum(range()), len(str(list(range()))), etc.
-  3. Reach any target by decrementing from the nearest anchor above it,
-     using max(range(n)) = n - 1
+Core insight: len(str(list(bytes(n)))) = 3n exactly.
+Combined with max(range(n)) = n - 1, any number can be built in base 3
+by interleaving 3x multiplications with 0-2 decrements per level.
+
+Budget for all of Unicode (max 1,114,111):
+  - 13 levels of 3x (4 parens each) = 52
+  - up to 2 decrements per level (2 parens each) = 52
+  - seed anchor ~4 + chr() 1 = 5
+  - total: ~109 parens, well under 200
 """
 
 # ── Base anchors ─────────────────────────────────────────────────────────
 # Numbers we can construct directly from zero-arg builtins.
-# Grouped by technique, comments show the derivation.
 
 # fmt: off
 BASE_ANCHORS = {
@@ -30,8 +33,10 @@ BASE_ANCHORS = {
     14:  'len(str(type(not())))',                     # "<class 'bool'>"
     15:  'len(str(type(float())))',                   # "<class 'float'>"
     17:  'len(str(type(complex())))',                 # "<class 'complex'>"
-    18:  'len(str(type(reversed(str()))))',           # "<class 'reversed'>"
+    18:  'len(str(type(property())))',                # "<class 'property'>"
     19:  'len(str(type(frozenset())))',               # "<class 'frozenset'>"
+    20:  'len(str(type(memoryview(bytes()))))',       # "<class 'memoryview'>"
+    21:  'len(str(type(classmethod(int()))))',        # "<class 'classmethod'>"
 
     # ── len() on iterator/reversed type name strings ──
     22:  'len(str(type(iter(set()))))',               # "<class 'set_iterator'>"
@@ -69,7 +74,6 @@ BASE_ANCHORS = {
 
 
 # ── Operations ───────────────────────────────────────────────────────────
-# Each takes an expression string and returns a new expression string.
 
 def decrement(expr, times):
     """max(range(n)) = n - 1. Costs 2 parens per step."""
@@ -78,121 +82,48 @@ def decrement(expr, times):
     return expr
 
 
-def triangular(expr):
-    """sum(range(n)) = n*(n-1)/2. Costs 2 parens."""
-    return f'sum(range({expr}))'
-
-
-def list_repr_len(expr):
-    """len(str(list(range(n)))) ≈ 4n. Costs 4 parens."""
-    return f'len(str(list(range({expr}))))'
-
-
-def bytes_repr_len(expr):
-    """len(str(bytes(range(n)))) ≈ 2n. Costs 4 parens. Only valid for n ≤ 256."""
-    return f'len(str(bytes(range({expr}))))'
-
-
-def bytearray_repr_len(expr):
-    """len(str(bytearray(range(n)))) ≈ 2n. Costs 4 parens. Only valid for n ≤ 256."""
-    return f'len(str(bytearray(range({expr}))))'
-
-
-# ── Anchor expansion ─────────────────────────────────────────────────────
-
-def expand_anchors(base, max_val=200_000):
-    """Grow the anchor set by repeatedly applying growing operations.
-
-    Each iteration applies every operation to every anchor and keeps
-    results that are new or cheaper (fewer parens) than existing entries.
-    Loops until no new anchors are found.
-    """
-    anchors = dict(base)
-    changed = True
-    while changed:
-        changed = False
-        for n, expr in sorted(list(anchors.items())):
-            if n < 2:
-                continue
-
-            candidates = []
-
-            # Triangular: n → n*(n-1)/2
-            tri = n * (n - 1) // 2
-            if 0 < tri <= max_val:
-                candidates.append((tri, triangular(expr)))
-
-            # List repr: n → ~4n
-            try:
-                val = len(str(list(range(n))))
-                if 0 < val <= max_val:
-                    candidates.append((val, list_repr_len(expr)))
-            except (OverflowError, MemoryError):
-                pass
-
-            # Bytes repr: n → ~2n (n ≤ 256 only)
-            if n <= 256:
-                val = len(str(bytes(range(n))))
-                if 0 < val <= max_val:
-                    candidates.append((val, bytes_repr_len(expr)))
-
-            # Bytearray repr: n → ~2n (n ≤ 256 only)
-            if n <= 256:
-                val = len(str(bytearray(range(n))))
-                if 0 < val <= max_val:
-                    candidates.append((val, bytearray_repr_len(expr)))
-
-            for val, new_expr in candidates:
-                if val not in anchors or new_expr.count('(') < anchors[val].count('('):
-                    anchors[val] = new_expr
-                    changed = True
-
-    return anchors
-
-
-ANCHORS = expand_anchors(BASE_ANCHORS)
+def triple(expr):
+    """len(str(list(bytes(n)))) = 3n exactly. Costs 4 parens."""
+    return f'len(str(list(bytes({expr}))))'
 
 
 # ── Building expressions ─────────────────────────────────────────────────
 
-sorted_anchors = sorted(ANCHORS.items())
-memo = dict(ANCHORS)
-
-
-def nearest_anchor_above(n):
-    """Find the smallest anchor value >= n. Returns (gap, expr) or None."""
-    for val, expr in sorted_anchors:
-        if val >= n:
-            return val - n, expr
-    return None
-
-
-def nearest_triangular_above(n):
-    """Find the smallest k where T(k) >= n. Returns (k, gap) or None."""
-    for k in range(2, 200_000):
-        tri = k * (k - 1) // 2
-        if tri >= n:
-            return k, tri - n
-    return None
+memo = {}
 
 
 def build_n(n):
-    """Build an expression that evaluates to integer n, using no numeric literals."""
+    """Build an expression evaluating to n, using no numeric literals.
+
+    Strategy: build n in base 3 by interleaving 3x multiplications
+    with 0-2 decrements per level. Works for any non-negative integer.
+    """
     if n in memo:
         return memo[n]
 
-    direct = nearest_anchor_above(n)
-    tri = nearest_triangular_above(n)
+    # Try base anchors first (cheapest for small/known numbers)
+    if n in BASE_ANCHORS:
+        memo[n] = BASE_ANCHORS[n]
+        return memo[n]
 
-    direct_gap = direct[0] if direct else float('inf')
-    tri_gap = tri[1] if tri else float('inf')
+    # For small n, find nearest anchor above and decrement
+    for anchor_val in sorted(BASE_ANCHORS):
+        if anchor_val >= n:
+            gap = anchor_val - n
+            result = decrement(BASE_ANCHORS[anchor_val], gap)
+            memo[n] = result
+            return result
 
-    if direct_gap <= tri_gap:
-        result = decrement(direct[1], direct_gap)
-    else:
-        k, gap = tri
-        result = decrement(triangular(build_n(k)), gap)
+    # Base-3 decomposition: n = 3 * (n // 3) + (n % 3)
+    # Build n//3 recursively, then apply 3x, then decrement by (n%3) if needed.
+    # But we actually need to go the other way: find q,r such that n = 3q + r.
+    # We build q, triple it to get 3q, then... we need to ADD r, but we can
+    # only subtract. So instead: n = 3q - r where r ∈ {0, 1, 2}.
+    # This means q = ceil(n/3), r = 3q - n.
+    q = -(-n // 3)  # ceiling division
+    r = 3 * q - n   # r ∈ {0, 1, 2}
 
+    result = decrement(triple(build_n(q)), r)
     memo[n] = result
     return result
 
@@ -211,5 +142,24 @@ if __name__ == '__main__':
         ok = "✓" if eval(expr) == val else "✗"
         print(f"  {ok} {val:>5} = {expr}")
 
-    print(f"\nExpanded to {len(ANCHORS)} anchors")
-    print(f"Range: {min(ANCHORS)} to {max(ANCHORS)}")
+    # Test coverage
+    print("\nTesting all printable ASCII...")
+    for i in range(32, 127):
+        expr = build_char(chr(i))
+        assert eval(expr) == chr(i), f"FAIL at {i}"
+    print("  All passed.")
+
+    print("\nSample expressions:")
+    for c in ['a', 'Z', '0', '~']:
+        expr = build_char(c)
+        depth = expr.count('(')
+        print(f"  {c!r} ({ord(c):>3}): depth={depth:>3}  {expr}")
+
+    # Test a big Unicode char
+    expr = build_char(chr(3486))  # ඞ
+    depth = expr.count('(')
+    print(f"  ඞ (3486): depth={depth:>3}  verified={eval(expr) == chr(3486)}")
+
+    expr = build_char(chr(128512))  # 😀
+    depth = expr.count('(')
+    print(f"  😀 (128512): depth={depth:>3}  verified={eval(expr) == chr(128512)}")
