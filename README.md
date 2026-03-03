@@ -1,3 +1,5 @@
+ai wrote this readme for now sorry i couldnt be bothered
+
 # pyfuncs_to_chars
 
 Write any character as a Python expression using **only builtin function calls** — no numeric literals, no string literals, no operators.
