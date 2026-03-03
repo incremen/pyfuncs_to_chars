@@ -57,22 +57,31 @@ Verify: eval gives 'a'
 |---|---|
 | 0-127 (ASCII) | 100% |
 | 128-1000 | 100% |
-| 1000-5000 | 99% |
-| 5000-10000 | 79% |
-| 10000-50000 | 40% |
-| 50000-100000 | 23% |
-| 100000-150000 | 18% |
+| 1000-5000 | 100% |
+| 5000-10000 | 98% |
+| 10000-50000 | 63% |
+| 50000-100000 | 38% |
+| 100000-150000 | 29% |
 
-Full ASCII works. Unicode coverage is ~30% of 0-150k.
+Full ASCII + first 5000 code points fully covered. ~46% of 0-150k overall.
 
-## The bottleneck
+## Growing operations
 
-`sum(range())` (triangular) is our only "growing" operation — it jumps quadratically. To cover 0-150k, we'd need every integer ~2 to ~548 reachable at low paren depth (since T(548) = 149,878). But reaching k=300 by decrementing from our highest base anchor (125) already blows the budget.
+Besides triangular (`sum(range(n))` = n*(n-1)/2), we discovered "multiplier" operations:
 
-The core need: **cheap ways to produce numbers in the 100-550 range**, so their triangulars land densely across 0-150k.
+- `len(str(list(range(n))))` ≈ **4n** — list repr length
+- `len(str(bytes(range(n))))` ≈ **2n** — bytes repr length (n ≤ 256)
+- `len(str(bytearray(range(n))))` ≈ **2n** — bytearray repr length (n ≤ 256)
+
+These cheaply produce numbers in the 100-550 range from base anchors (depth 8), which then feed into triangulars to cover the 5k-130k range.
+
+## The remaining bottleneck
+
+T(k+1) - T(k) = k. Once k > ~90 (our decrement budget), there's no integer between k and k+1 to produce an intermediate triangular. For example, T(510) = 129,795 and T(511) = 130,305 are 510 apart — no amount of anchors between 510 and 511 can fix this, since there are no integers there.
+
+Covering the full 0-150k range would require a new operation that produces values directly in the 50k-150k range at low depth, without going through triangulars.
 
 ## Open questions
 
-- What single-arg builtin compositions can cheaply produce numbers in the 100-550 range?
-- Are there other "growing" operations besides triangular that we're missing?
-- Can chaining operations like `len(str(bytes(range(n))))` (~4n, linear growth) help fill gaps?
+- Is there a single-arg builtin composition that grows faster than ~4x but slower than quadratic?
+- Can we find operations that produce values in 50k+ directly, bypassing the T(k) gap problem?
